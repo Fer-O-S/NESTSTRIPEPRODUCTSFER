@@ -8,8 +8,6 @@ import * as bodyParser from 'body-parser';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // CONFIGURACIÓN CORRECTA PARA STRIPE WEBHOOK
-  // Esto debe ir ANTES que cualquier otro middleware de JSON
   app.use('/stripe/webhook', bodyParser.raw({ type: 'application/json' }));
 
   app.useGlobalPipes(
@@ -29,8 +27,6 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, documentFactory);
 
   app.useGlobalFilters(new PrismaClientExceptionFilter());
-
-  app.use('/stripe/webhook', bodyParser.raw({ type: 'application/json' }));
 
   app.enableCors();
 

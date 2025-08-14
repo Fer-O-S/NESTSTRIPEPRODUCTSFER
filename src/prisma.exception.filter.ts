@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { Response } from 'express';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
 @Catch()
 export class PrismaClientExceptionFilter implements ExceptionFilter {
@@ -24,7 +25,7 @@ export class PrismaClientExceptionFilter implements ExceptionFilter {
     }
 
     // Aquí es donde se hace el cambio
-    if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+    if (exception instanceof PrismaClientKnownRequestError) {
       // Código de error específico
       switch (exception.code) {
         case 'P2002': //
