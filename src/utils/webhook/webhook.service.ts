@@ -1,10 +1,55 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/config/prisma/prisma.service';
 import { OrderStatus, PaymentStatus } from '@prisma/client';
+import Stripe from 'stripe';
 
 @Injectable()
 export class WebhookService {
-  constructor(private prisma: PrismaService) {}
+  private stripe: Stripe;
+
+  constructor(
+    private prisma: PrismaService,
+    private configService: ConfigService,
+  ) {
+    const stripeKey = this.configService.get<string>('STRIPE_API_KEY');
+    if (!stripeKey) throw new Error('Stripe API key is missing');
+    this.stripe = new Stripe(stripeKey);
+  }
+
+  async processWebhook(rawBody: Buffer, signature: string) {
+    const endpointSecret = this.configService.get<string>(
+      'STRIPE_WEBHOOK_SECRET',
+    );
+    
+    if (!endpointSecret) {
+      throw new Error('Webhook secret not configured');
+    }
+
+    let event: Stripe.Event;
+    try {
+      event = this.stripe.webhooks.constructEvent(
+        rawBody,
+        signature,
+        endpointSecret,
+      );
+    } catch {
+      throw new Error('Invalid signature');
+    }
+
+    // Manejar eventos
+    switch (event.type) {
+      case 'checkout.session.completed':
+        await this.handleCheckoutSessionCompleted(event.data.object);
+        break;
+      case 'payment_intent.succeeded':
+        await this.handlePaymentIntentSucceeded(event.data.object);
+        break;
+      case 'payment_intent.payment_failed':
+        await this.handlePaymentIntentFailed(event.data.object);
+        break;
+    }
+  }
 
   // Manejar checkout session completada
   async handleCheckoutSessionCompleted(session: any) {
