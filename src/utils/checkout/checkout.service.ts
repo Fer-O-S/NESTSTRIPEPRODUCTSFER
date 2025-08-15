@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/config/prisma/prisma.service';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class CheckoutService {
@@ -20,7 +21,7 @@ export class CheckoutService {
     this.stripe = new Stripe(stripeKey);
   }
 
-  // Método original (mantenerlo para compatibilidad)
+  // Método original
   async createCheckoutSession(): Promise<Stripe.Checkout.Session> {
     const session = await this.stripe.checkout.sessions.create({
       success_url: 'https://example.com/success',
@@ -63,12 +64,14 @@ export class CheckoutService {
     }
 
     // 3. Crear orden en la DB (estado PENDING)
+    const totalAmount = product.price * (createCheckoutDto.quantity || 1);
+
     const order = await this.prisma.order.create({
       data: {
         userId: createCheckoutDto.userId,
         productId: createCheckoutDto.productId,
         quantity: createCheckoutDto.quantity || 1,
-        totalAmount: product.price * (createCheckoutDto.quantity || 1),
+        totalAmount: new Prisma.Decimal(totalAmount),
         currency: product.currency,
       },
     });
@@ -106,7 +109,7 @@ export class CheckoutService {
       sessionId: session.id,
       url: session.url,
       orderId: order.id,
-      totalAmount: order.totalAmount,
+      totalAmount: order.totalAmount.toString(),
       currency: order.currency,
     };
   }
@@ -123,6 +126,7 @@ export class CheckoutService {
         user: {
           select: { id: true, name: true, email: true },
         },
+        payments: true,
       },
     });
 

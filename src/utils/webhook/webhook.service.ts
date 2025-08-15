@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/config/prisma/prisma.service';
-import { OrderStatus, PaymentStatus } from '@prisma/client';
+import { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
 import Stripe from 'stripe';
 
 @Injectable()
@@ -21,10 +21,7 @@ export class WebhookService {
     const endpointSecret = this.configService.get<string>(
       'STRIPE_WEBHOOK_SECRET',
     );
-
-    if (!endpointSecret) {
-      throw new Error('Webhook secret not configured');
-    }
+    if (!endpointSecret) throw new Error('Webhook secret not configured');
 
     let event: Stripe.Event;
     try {
@@ -37,7 +34,6 @@ export class WebhookService {
       throw new Error('Invalid signature');
     }
 
-    // Manejar eventos
     switch (event.type) {
       case 'checkout.session.completed':
         await this.handleCheckoutSessionCompleted(event.data.object);
@@ -48,10 +44,12 @@ export class WebhookService {
       case 'payment_intent.payment_failed':
         await this.handlePaymentIntentFailed(event.data.object);
         break;
+      case 'charge.succeeded':
+        await this.handleChargeSucceeded(event.data.object);
+        break;
     }
   }
 
-  // Manejar checkout session completada
   async handleCheckoutSessionCompleted(session: any) {
     const orderId = parseInt(session.metadata?.orderId);
     if (!orderId) return;
@@ -61,30 +59,39 @@ export class WebhookService {
       data: {
         status: OrderStatus.PAID,
         paidAt: new Date(),
-        stripePaymentIntentId: session.payment_intent,
+        stripePaymentIntentId: session.payment_intent || undefined,
         paymentMethod: session.payment_method_types[0] || 'card',
       },
     });
 
-    await this.prisma.payment.create({
-      data: {
+    const existingPayment = await this.prisma.payment.findFirst({
+      where: { orderId },
+    });
+
+    if (!existingPayment) {
+      const paymentData: any = {
         orderId,
         userId: updatedOrder.userId,
-        amount: session.amount_total / 100,
+        amount: new Prisma.Decimal(session.amount_total / 100),
         currency: session.currency,
         status: PaymentStatus.SUCCEEDED,
-        stripeChargeId: session.payment_intent,
-      },
-    });
+      };
+      if (session.payment_intent) {
+        paymentData.stripeChargeId = session.payment_intent;
+      }
+      await this.prisma.payment.create({ data: paymentData });
+    }
+
+    if (session.payment_intent) {
+      await this.updatePaymentWithReceiptUrl(session.payment_intent, orderId);
+    }
   }
 
-  // Manejar payment intent exitoso
   async handlePaymentIntentSucceeded(paymentIntent: any) {
     const order = await this.prisma.order.findFirst({
       where: { stripePaymentIntentId: paymentIntent.id },
     });
-    if (!order) return;
-    if (order.status === OrderStatus.PAID) return;
+    if (!order || order.status === OrderStatus.PAID) return;
 
     await this.prisma.order.update({
       where: { id: order.id },
@@ -98,32 +105,98 @@ export class WebhookService {
       where: { orderId: order.id },
     });
 
+    const charges = await this.stripe.charges.list({
+      payment_intent: paymentIntent.id,
+      limit: 1,
+    });
+
+    let chargeId: string | undefined;
+    let receiptUrl: string | undefined;
+
+    if (charges.data.length > 0) {
+      chargeId = charges.data[0].id;
+      receiptUrl = charges.data[0].receipt_url || undefined;
+    }
+
     if (existingPayment) {
+      const updateData: any = { status: PaymentStatus.SUCCEEDED };
+      if (chargeId) updateData.stripeChargeId = chargeId;
+      if (receiptUrl) updateData.receiptUrl = receiptUrl;
+
       await this.prisma.payment.update({
         where: { id: existingPayment.id },
-        data: {
-          status: PaymentStatus.SUCCEEDED,
-          stripeChargeId: paymentIntent.charges?.data[0]?.id,
-          receiptUrl: paymentIntent.charges?.data[0]?.receipt_url,
-        },
+        data: updateData,
       });
       return;
     }
 
-    await this.prisma.payment.create({
-      data: {
-        orderId: order.id,
-        userId: order.userId,
-        amount: paymentIntent.amount_received / 100,
-        currency: paymentIntent.currency,
-        status: PaymentStatus.SUCCEEDED,
-        stripeChargeId: paymentIntent.charges?.data[0]?.id,
-        receiptUrl: paymentIntent.charges?.data[0]?.receipt_url,
-      },
-    });
+    const createData: any = {
+      orderId: order.id,
+      userId: order.userId,
+      amount: new Prisma.Decimal(paymentIntent.amount_received / 100),
+      currency: paymentIntent.currency,
+      status: PaymentStatus.SUCCEEDED,
+    };
+    if (chargeId) createData.stripeChargeId = chargeId;
+    if (receiptUrl) createData.receiptUrl = receiptUrl;
+
+    await this.prisma.payment.create({ data: createData });
   }
 
-  // Manejar payment intent fallido
+  async handleChargeSucceeded(charge: any) {
+    if (!charge.payment_intent) return;
+
+    let payment = await this.prisma.payment.findFirst({
+      where: { stripeChargeId: charge.id },
+    });
+
+    if (!payment) {
+      const order = await this.prisma.order.findFirst({
+        where: { stripePaymentIntentId: charge.payment_intent },
+      });
+
+      if (order) {
+        payment = await this.prisma.payment.findFirst({
+          where: { orderId: order.id },
+        });
+      }
+    }
+
+    if (payment && charge.receipt_url) {
+      const updateData: any = { stripeChargeId: charge.id };
+      updateData.receiptUrl = charge.receipt_url;
+
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: updateData,
+      });
+    }
+  }
+
+  private async updatePaymentWithReceiptUrl(
+    paymentIntentId: string,
+    orderId: number,
+  ) {
+    const charges = await this.stripe.charges.list({
+      payment_intent: paymentIntentId,
+      limit: 1,
+    });
+
+    if (charges.data.length > 0) {
+      const charge = charges.data[0];
+      if (charge.receipt_url) {
+        const updateData: any = {
+          stripeChargeId: charge.id,
+          receiptUrl: charge.receipt_url,
+        };
+        await this.prisma.payment.updateMany({
+          where: { orderId },
+          data: updateData,
+        });
+      }
+    }
+  }
+
   async handlePaymentIntentFailed(paymentIntent: any) {
     const order = await this.prisma.order.findFirst({
       where: { stripePaymentIntentId: paymentIntent.id },
@@ -138,6 +211,7 @@ export class WebhookService {
     const payment = await this.prisma.payment.findFirst({
       where: { orderId: order.id },
     });
+
     if (payment) {
       await this.prisma.payment.update({
         where: { id: payment.id },
