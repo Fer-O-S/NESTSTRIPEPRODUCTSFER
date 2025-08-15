@@ -21,7 +21,7 @@ export class WebhookService {
     const endpointSecret = this.configService.get<string>(
       'STRIPE_WEBHOOK_SECRET',
     );
-    
+
     if (!endpointSecret) {
       throw new Error('Webhook secret not configured');
     }
@@ -107,19 +107,20 @@ export class WebhookService {
           receiptUrl: paymentIntent.charges?.data[0]?.receipt_url,
         },
       });
-    } else {
-      await this.prisma.payment.create({
-        data: {
-          orderId: order.id,
-          userId: order.userId,
-          amount: paymentIntent.amount_received / 100,
-          currency: paymentIntent.currency,
-          status: PaymentStatus.SUCCEEDED,
-          stripeChargeId: paymentIntent.charges?.data[0]?.id,
-          receiptUrl: paymentIntent.charges?.data[0]?.receipt_url,
-        },
-      });
+      return;
     }
+
+    await this.prisma.payment.create({
+      data: {
+        orderId: order.id,
+        userId: order.userId,
+        amount: paymentIntent.amount_received / 100,
+        currency: paymentIntent.currency,
+        status: PaymentStatus.SUCCEEDED,
+        stripeChargeId: paymentIntent.charges?.data[0]?.id,
+        receiptUrl: paymentIntent.charges?.data[0]?.receipt_url,
+      },
+    });
   }
 
   // Manejar payment intent fallido
