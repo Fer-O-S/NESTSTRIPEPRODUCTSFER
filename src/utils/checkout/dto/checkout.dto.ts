@@ -27,9 +27,4 @@ export class CheckoutItemDto {
   @IsString()
   @ApiProperty({ example: 'https://miapp.com/cancel' })
   cancelUrl?: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @ApiProperty({ example: 'customerIdStripe' })
-  stripeCustomerId: string;
 }

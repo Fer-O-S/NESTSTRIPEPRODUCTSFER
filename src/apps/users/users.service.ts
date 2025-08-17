@@ -1,22 +1,51 @@
-import { Injectable, Param } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/config/prisma/prisma.service';
 import { UserDto } from './dto/register.dto';
 import * as bcrypt from 'bcrypt';
-import { text } from 'stream/consumers';
+import { Stripe } from 'stripe';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class UserService {
-  constructor(private prismaService: PrismaService) {}
+  private stripe: Stripe;
+
+  constructor(
+    private configService: ConfigService,
+    private prisma: PrismaService,
+  ) {
+    const stripeKey = this.configService.get<string>('STRIPE_API_KEY');
+
+    if (!stripeKey) {
+      throw new Error('No se encontró la apikey en .env');
+    }
+    this.stripe = new Stripe(stripeKey);
+  }
 
   async createUser(data: UserDto) {
-    data.password = await bcrypt.hash(data.password, 10);
-    await this.prismaService.users.create({ data: data });
+    // Hash the password before saving the user
+    const hashedPassword = await bcrypt.hash(data.password, 10);
 
-    return { message: 'User Created Successfully' };
+    // Create the user in Stripe
+    const stripeUser = await this.stripe.customers.create({
+      name: data.name,
+      email: data.email,
+    });
+
+    // Save the user in the database
+    const user = await this.prisma.users.create({
+      data: {
+        email: data.email,
+        name: data.name,
+        password: hashedPassword,
+        stripeCustomerId: stripeUser.id,
+      },
+    });
+
+    return { message: 'User Created Successfully', user };
   }
 
   async getUserById(user_id: number) {
-    const foundUser = await this.prismaService.users.findFirst({
+    const foundUser = await this.prisma.users.findFirst({
       where: { id: user_id },
       // Seleccionar campos a devolver
       select: {

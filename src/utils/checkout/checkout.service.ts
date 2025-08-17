@@ -20,7 +20,29 @@ export class CheckoutService {
   }
 
   async createCheckoutSession(dto: CheckoutItemDto) {
-    // 1. Validar producto
+    // Validar usuario
+    const user = await this.prisma.users.findUnique({
+      where: { id: dto.userId },
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    // Crear cliente en Stripe si no tiene stripeCustomerId
+    let stripeCustomerId = user.stripeCustomerId;
+    if (!stripeCustomerId) {
+      const stripeCustomer = await this.stripe.customers.create({
+        name: user.name,
+        email: user.email,
+      });
+      stripeCustomerId = stripeCustomer.id;
+
+      // Actualizar el usuario en la base de datos
+      await this.prisma.users.update({
+        where: { id: user.id },
+        data: { stripeCustomerId },
+      });
+    }
+
+    // Validar producto
     const product = await this.prisma.products.findUnique({
       where: { id: dto.productId },
     });
@@ -28,13 +50,7 @@ export class CheckoutService {
     if (!product.stripePriceId)
       throw new Error('Producto no tiene Price ID de Stripe');
 
-    // 2. Validar usuario
-    const user = await this.prisma.users.findUnique({
-      where: { id: dto.userId },
-    });
-    if (!user) throw new NotFoundException('Usuario no encontrado');
-
-    // 3. Crear orden en DB
+    // Crear orden en DB
     const quantity = dto.quantity || 1;
     const order = await this.prisma.orders.create({
       data: {
@@ -46,7 +62,7 @@ export class CheckoutService {
       },
     });
 
-    // 4. Crear sesión de Stripe
+    // Crear sesión de Stripe
     const session = await this.stripe.checkout.sessions.create({
       success_url: dto.successUrl || 'http://localhost:3000/success',
       cancel_url: dto.cancelUrl || 'http://localhost:3000/cancel',
@@ -63,16 +79,15 @@ export class CheckoutService {
         userId: dto.userId.toString(),
         productId: dto.productId.toString(),
       },
-      customer: dto.stripeCustomerId,
+      customer: stripeCustomerId,
     });
 
-    // 5. Actualizar orden con el sessionId de Stripe
+    // Actualizar orden con el sessionId de Stripe
     await this.prisma.orders.update({
       where: { id: order.id },
       data: { stripeCheckoutSessionId: session.id },
     });
 
-    // 6. Retornar datos
     return {
       sessionId: session.id,
       url: session.url,
