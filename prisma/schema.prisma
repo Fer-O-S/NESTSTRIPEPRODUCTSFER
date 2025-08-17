@@ -1,0 +1,119 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Users {
+  id       Int    @id @default(autoincrement())
+  name     String
+  email    String @unique
+  password String
+  stripeCustomerId String? @unique
+
+  // Back-relations
+  orders   Orders[]
+  payments Payments[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Form {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  message   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Products {
+  id              Int      @id @default(autoincrement())
+  name            String
+  description     String?
+  price           Float
+  currency        String
+  stock           Int?
+  active          Boolean  @default(true)
+  imageUrl        String?
+  stripeProductId String?
+  stripePriceId   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  mode            String // 'payment' solamente
+  orders          Orders[] // Relación con órdenes
+}
+
+model Orders {
+  id Int @id @default(autoincrement())
+
+  // Relación con usuario
+  userId Int
+  user   Users @relation(fields: [userId], references: [id])
+
+  // Relación con producto
+  productId Int
+  product   Products @relation(fields: [productId], references: [id])
+
+  quantity    Int         @default(1)
+  totalAmount Decimal     @db.Decimal(10, 2)
+  currency    String      @default("mxn")
+  status      OrderStatus @default(PENDING)
+
+  // Stripe IDs
+  stripePaymentIntentId   String?   @unique
+  stripeCheckoutSessionId String?
+  paymentMethod           String?
+  paidAt                  DateTime?
+
+  // Relación con pagos
+  payments Payments[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Payments {
+  id Int @id @default(autoincrement())
+
+  orderId Int
+  order   Orders @relation(fields: [orderId], references: [id])
+
+  userId Int
+  user   Users @relation(fields: [userId], references: [id])
+
+  // Stripe info
+  stripeChargeId String?       @unique
+  amount         Decimal       @db.Decimal(10, 2)
+  currency       String        @default("mxn")
+  status         PaymentStatus @default(PENDING)
+  receiptUrl     String? // URL del recibo de Stripe
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Enums básicos
+enum OrderStatus {
+  PENDING
+  PAID
+  CANCELED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
