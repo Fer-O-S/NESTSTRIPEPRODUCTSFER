@@ -13,11 +13,6 @@ export class UserController {
     return await this.registerService.createUser(registeruserDto);
   }
 
-  @Get('text')
-  async gettext() {
-    return 'Hola mundo fer';
-  }
-
   @Get(':id')
   async getUserById(@Param('id') user_id: number) {
     return await this.registerService.getUserById(user_id);

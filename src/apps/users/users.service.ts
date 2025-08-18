@@ -31,17 +31,17 @@ export class UserService {
       email: data.email,
     });
 
-    // Save the user in the database
-    const user = await this.prisma.users.create({
-      data: {
-        email: data.email,
-        name: data.name,
-        password: hashedPassword,
-        stripeCustomerId: stripeUser.id,
-      },
-    });
+    // // Save the user in the database
+    // const user = await this.prisma.users.create({
+    //   data: {
+    //     email: data.email,
+    //     name: data.name,
+    //     password: hashedPassword,
+    //     stripeCustomerId: stripeUser.id,
+    //   },
+    // });
 
-    return { message: 'User Created Successfully', user };
+    return { message: 'User Created Successfully'};
   }
 
   async getUserById(user_id: number) {

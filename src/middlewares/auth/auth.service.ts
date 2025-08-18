@@ -26,8 +26,13 @@ export class AuthService {
 
   //Make the token to access
   async login(user: any) {
-    const payload = { email: user.email, sub: user.id };
-    return {
+    const payload = { 
+      email: user.email, 
+      sub: user.id,
+      customer: user.stripeCustomerId, // Agregado para incluir en el token
+      plan: true
+    };
+    return { 
       access_token: this.jwtService.sign(payload),
     };
   }
